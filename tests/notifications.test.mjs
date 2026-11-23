@@ -94,6 +94,8 @@ test('HTTP scopes subscriptions by trusted user, denies forged identity and non-
  assert.equal((await call(server,{url:'/app-api/notifications',user:''})).status,401);
  assert.equal((await call(server,{url:'/app-api/home',method:'POST',body:{address:home}})).status,403);
  assert.equal((await call(server,{url:'/app-api/home',method:'POST',user:'admin',body:{address:home}})).status,200);
+ assert.equal((await call(server,{url:'/app-api/context',user:'bob'})).body.isAdmin,false);
+ assert.equal((await call(server,{url:'/app-api/home',user:'bob'})).body.home.building.buildingName,'1-А');
  assert.equal((await call(server,{url:'/app-api/notifications',user:'bob'})).body.paired,false);
  assert.equal((await call(server,{url:'/app-api/notifications',user:'alice'})).body.paired,true);
 });

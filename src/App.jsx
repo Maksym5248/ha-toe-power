@@ -3,10 +3,12 @@ import { collection, dayKey, graphRequest, outageRanges, request, shiftDay, slot
 import NotificationSettings, { appRequest } from './NotificationSettings';
 import './styles.css';
 import SearchSelect from './SearchSelect';
+import { connectHomeAssistantTheme } from './ha-theme';
 const DEFAULT = { city: null, street: null, building: null };
 function readSaved(key) { try { return JSON.parse(localStorage.getItem(key)) || {}; } catch { return {}; } }
 const validAddress = a => a?.city?.id && a?.street?.id && typeof a?.building?.buildingName === 'string';
 export default function AppRoot() {
+  useEffect(()=>connectHomeAssistantTheme(),[]);
   const [context,setContext]=useState(null),[contextError,setContextError]=useState(''),[attempt,setAttempt]=useState(0);
   useEffect(()=>{let active=true;appRequest('context').then(data=>{if(active)setContext(data);}).catch(e=>{if(active)setContextError(e.message);});return ()=>{active=false;};},[attempt]);
   if(contextError) return <div className="empty"><p role="alert">{contextError}</p><button onClick={()=>{setContextError('');setAttempt(x=>x+1);}}>Повторити з’єднання</button></div>;
