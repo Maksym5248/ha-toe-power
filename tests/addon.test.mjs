@@ -11,6 +11,7 @@ test('add-on is self-contained and its compiled entry supports an Ingress prefix
     await access(new URL(`dist/client/${asset}`, root));
   }
   assert.equal(await readFile(new URL('server.mjs', root), 'utf8'), await readFile(new URL('../server.mjs', import.meta.url), 'utf8'));
+  await import(new URL('server.mjs', root));
   const javascript = assets.find(a => a.endsWith('.js'));
   const js = await readFile(new URL(`dist/client/${javascript}`, root), 'utf8');
   assert.ok(js.includes('./toe-api'));

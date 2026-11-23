@@ -11,7 +11,7 @@ export default defineConfig({
   },
   server: {
     host: "0.0.0.0",
-    proxy: { "/toe-api": { target: "https://api-poweron.toe.com.ua", changeOrigin: true, rewrite: path => path.replace(/^\/toe-api/, "/api") } },
+    proxy: { "/app-api": {target:"http://127.0.0.1:4173",changeOrigin:true}, "/toe-api": { target: "https://api-poweron.toe.com.ua", changeOrigin: true, rewrite: path => path.replace(/^\/toe-api/, "/api") } },
     allowedHosts: ["terminal.local"],
     warmup: {
       clientFiles: ["./src/main.jsx"],

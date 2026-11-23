@@ -1,14 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { addressKey, collection, dayKey, graphRequest, outageRanges, request, shiftDay, slotsFor, statusInfo } from './api';
-import notificationTemplate from '../home-assistant/toe_morning.yaml?raw';
+import { collection, dayKey, graphRequest, outageRanges, request, shiftDay, slotsFor, statusInfo } from './api';
+import NotificationSettings, { appRequest } from './NotificationSettings';
 import './styles.css';
+import SearchSelect from './SearchSelect';
 const DEFAULT = { city: null, street: null, building: null };
-function readSaved() { try { return JSON.parse(localStorage.getItem('toe-settings-v2')) || {}; } catch { return {}; } }
-const saved = readSaved();
+function readSaved(key) { try { return JSON.parse(localStorage.getItem(key)) || {}; } catch { return {}; } }
 const validAddress = a => a?.city?.id && a?.street?.id && typeof a?.building?.buildingName === 'string';
-function download(name, content) {
-  const url = URL.createObjectURL(new Blob([content], { type: 'text/yaml;charset=utf-8' }));
-  const a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+export default function AppRoot() {
+  const [context,setContext]=useState(null),[contextError,setContextError]=useState(''),[attempt,setAttempt]=useState(0);
+  useEffect(()=>{let active=true;appRequest('context').then(data=>{if(active)setContext(data);}).catch(e=>{if(active)setContextError(e.message);});return ()=>{active=false;};},[attempt]);
+  if(contextError) return <div className="empty"><p role="alert">{contextError}</p><button onClick={()=>{setContextError('');setAttempt(x=>x+1);}}>Повторити з’єднання</button></div>;
+  return context ? <App key={context.userId} context={context} /> : <p className="empty">Завантажуємо налаштування…</p>;
 }
 function DayCard({ record, group, day, loading }) {
   const slots = slotsFor(record, group);
@@ -22,7 +24,9 @@ function DayCard({ record, group, day, loading }) {
     })}</div><p className="range-summary">{ranges.length ? ranges.map(r => `${r.start}–${r.end}${r.code === '10' ? ' (перемикання)' : ''}`).join(' · ') : 'Планових відключень у наявних даних немає.'}{slots.some(s => s.code === '?') ? ' Є інтервали без даних.' : ''}</p></>}
   </section>;
 }
-export default function App() {
+function App({context}) {
+  const storageKey = `toe-settings-v3:${context.userId}`;
+  const [saved] = useState(()=>context.available?{address:context.home}:readSaved(storageKey));
   const [address, setAddress] = useState(validAddress(saved.address) ? saved.address : DEFAULT);
   const [draft, setDraft] = useState(address);
   const [cities, setCities] = useState([]), [streets, setStreets] = useState([]), [buildings, setBuildings] = useState([]);
@@ -31,11 +35,20 @@ export default function App() {
   const [error, setError] = useState(''), [settingsError, setSettingsError] = useState('');
   const [revision, setRevision] = useState(0), [updated, setUpdated] = useState(null);
   const [day, setDay] = useState(0), [open, setOpen] = useState(!validAddress(saved.address));
-  const [notifications, setNotifications] = useState(saved.notifications ?? false);
-  const [time, setTime] = useState(saved.time || '09:00');
-  const [notifyAction, setNotifyAction] = useState(saved.notifyAction || 'persistent_notification.create');
-  const [exported, setExported] = useState(false);
-  useEffect(() => { try { localStorage.setItem('toe-settings-v2', JSON.stringify({ address, notifications, time, notifyAction })); } catch {} }, [address, notifications, time, notifyAction]);
+  useEffect(() => { try { !context.available && localStorage.setItem(storageKey, JSON.stringify({ address })); } catch {} }, [address, storageKey]);
+  useEffect(()=> {
+    if(!context.available) return;
+    const c=new AbortController();
+    appRequest('home').then(data=>{if(!c.signal.aborted && JSON.stringify(data.home)!==JSON.stringify(address)){setAddress(data.home||DEFAULT);setDraft(data.home||DEFAULT);}}).catch(e=>{if(!c.signal.aborted)setError(e.message);});
+    return ()=>c.abort();
+  },[revision]);
+  async function saveHome() {
+    try {
+      setSettingsError('');
+      if(context.available) await appRequest('home',{address:draft});
+      setAddress(draft);setRevision(x=>x+1);setOpen(false);
+    }catch(e){setSettingsError(e.message);}
+  }
   useEffect(() => {
     const c = new AbortController();
     request('pw_cities', { pagination: 'false', 'otg.id': '' }, c.signal).then(collection).then(items => setCities(items.filter(c => c.name?.trim()).sort((a,b) => a.name.localeCompare(b.name, 'uk')))).catch(e => { if (!c.signal.aborted) setSettingsError(e.message); });
@@ -72,25 +85,12 @@ export default function App() {
   useEffect(() => { const timer = setInterval(() => setRevision(x => x + 1), 300000); return () => clearInterval(timer); }, []);
   const selectedDay = shiftDay(dayKey(), day);
   const selectedRecord = [...records].filter(r => String(r.dateGraph).slice(0, 10) === selectedDay).sort((a,b) => String(b.dateCreate || '').localeCompare(String(a.dateCreate || '')))[0];
-  function exportNotifications() {
-    const quote = JSON.stringify;
-    // One automation per supply group; each gets its own stable ID.
-    const documents = groups.map((group, index) => {
-      let text = notificationTemplate.replace('initial: "09:00:00"', `initial: ${quote(time + ':00')}`)
-        .replace('group: "__TOE_GROUP__"', `group: ${quote(group)}`).replace('address_key: "__TOE_ADDRESS__"', `address_key: ${quote(addressKey(address))}`)
-        .replace('notification_action: persistent_notification.create', `notification_action: ${quote(notifyAction)}`)
-        .replace('id: toe_morning_outages', `id: toe_morning_outages_${group.replace(/[^\w]/g, '_')}`)
-        .replace('    mode: single', `    initial_state: ${notifications ? 'true' : 'false'}\n    mode: single`);
-      return index ? text.slice(text.indexOf('  - id:')) : text;
-    });
-    download('toe_morning.yaml', documents.join('\n')); setExported(true);
-  }
-  return <div className={`app ${open ? 'settings-screen' : 'schedule-screen'}`}><aside className="sidebar" aria-label="Налаштування"><div className="settings-heading"><div><p className="eyebrow">СВІТЛО ВДОМА</p><h1>Налаштування</h1></div><button onClick={() => setOpen(false)}>До графіка</button></div><div className="settings-columns"><section className="address-settings"><h2>Моя адреса</h2><p className="muted">Оберіть адресу, щоб побачити свій графік.</p>
-    <label>Населений пункт<select value={draft.city?.id || ''} onChange={e => setDraft({ city: cities.find(c => String(c.id) === e.target.value), street: null, building: null })}><option value="">Оберіть місто</option>{cities.map(c => <option key={c.id} value={c.id}>{c.name}{c.otg?.name ? ` (${c.otg.name} ОТГ)` : ''}</option>)}</select></label>
-    <label>Вулиця<select disabled={!draft.city || !streets.length} value={draft.street?.id || ''} onChange={e => setDraft({ ...draft, street: streets.find(s => String(s.id) === e.target.value), building: null })}><option value="">{draft.city ? (streets.length ? 'Оберіть вулицю' : 'Завантаження вулиць…') : 'Спочатку оберіть місто'}</option>{streets.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-    <label>Будинок<select disabled={!draft.street || !buildings.length} value={draft.building?.buildingName || ''} onChange={e => setDraft({ ...draft, building: buildings.find(b => b.buildingName === e.target.value) })}><option value="">{draft.street ? (buildings.length ? 'Оберіть будинок' : 'Будинки недоступні або завантажуються…') : 'Спочатку оберіть вулицю'}</option>{buildings.map(b => <option key={b.id} value={b.buildingName}>{b.buildingName}</option>)}</select></label>
-    {settingsError && <p role="alert" className="error">{settingsError}</p>}<button className="primary" disabled={!validAddress(draft)} onClick={() => { setAddress(draft); setRevision(x => x + 1); setExported(false); setOpen(false); }}>Зберегти й показати графік</button>
-    </section><section className="notification-settings"><h2>Сповіщення</h2><p className="muted small">Для збереженої адреси: {address.city?.name || ''}, {address.street?.name || ''}, {address.building?.buildingName || ''}.</p><label className="toggle"><span>Ранковий графік</span><input type="checkbox" checked={notifications} onChange={e => { setNotifications(e.target.checked); setExported(false); }} /></label><label>Час за Києвом<input type="time" value={time} required onChange={e => { setTime(e.target.value); setExported(false); }} /></label><label>Куди надсилати<input value={notifyAction} onChange={e => { setNotifyAction(e.target.value); setExported(false); }} placeholder="notify.mobile_app_ваш_телефон" /></label><p className="muted small">Надсилає Home Assistant. Вкажіть дію телефону або залиште сповіщення в Home Assistant.</p><button disabled={!groups.length || loading || !time || !/^(notify\.[a-z0-9_]+|persistent_notification\.create)$/.test(notifyAction)} onClick={exportNotifications}>Завантажити налаштування HA</button><p className="muted small" role="status">{exported ? 'Файл завантажено. Підключіть пакет у Home Assistant, щоб застосувати зміни.' : 'Перемикач застосовується після встановлення завантаженого пакета в Home Assistant.'}</p></section></div>
+  return <div className={`app ${open ? 'settings-screen' : 'schedule-screen'}`}><aside className="sidebar" aria-label="Налаштування"><div className="settings-heading"><div><p className="eyebrow">СВІТЛО ВДОМА</p><h1>Налаштування</h1></div><button onClick={() => setOpen(false)}>До графіка</button></div><div className="settings-columns"><section className="address-settings"><h2>Адреса дому</h2><p className="muted">Одна адреса й графік для всіх користувачів. Змінює адміністратор Home Assistant.</p><fieldset disabled={!context.isAdmin}>
+    <SearchSelect label="Населений пункт" options={cities.map(c=>({value:c.id,label:c.name+(c.otg?.name?` (${c.otg.name} ОТГ)`:''),item:c}))} value={draft.city?.id} fallback={draft.city?.name} placeholder="Почніть вводити назву міста" onChange={city=>setDraft({city,street:null,building:null})} />
+    <SearchSelect label="Вулиця" options={streets.map(v=>({value:v.id,label:v.name,item:v}))} value={draft.street?.id} fallback={draft.street?.name} disabled={!draft.city||!streets.length} placeholder="Почніть вводити назву вулиці" onChange={street=>setDraft({...draft,street,building:null})} />
+    <SearchSelect label="Будинок" options={buildings.map(v=>({value:v.id,label:v.buildingName,item:v}))} value={draft.building?.id} fallback={draft.building?.buildingName} disabled={!draft.street||!buildings.length} placeholder="Введіть номер будинку" onChange={building=>setDraft({...draft,building})} />
+    {settingsError && <p role="alert" className="error">{settingsError}</p>}<button className="primary" disabled={!validAddress(draft)} onClick={saveHome}>Зберегти й показати графік</button></fieldset>
+    </section><NotificationSettings context={context} address={address} /></div>
     <a className="source" href="https://poweron.toe.com.ua/" target="_blank" rel="noreferrer">Дані Тернопільобленерго ↗</a>
   </aside><main><div className="topbar"><div><h1>Світло вдома</h1></div><button onClick={() => setOpen(!open)} aria-expanded={open}>Налаштування</button></div><p className="address">{address.city?.name || ''}, {address.street?.name || ''}, буд. {address.building?.buildingName || ''}</p><div className="toolbar"><div className="tabs">{['Сьогодні','Завтра'].map((label, i) => <button key={label} className={i === day ? 'active' : ''} onClick={() => setDay(i)} aria-pressed={i === day}>{label}</button>)}</div><button disabled={loading} onClick={() => setRevision(x => x + 1)}>{loading ? 'Оновлюємо…' : 'Оновити графік'}</button></div>
     {error && <p role="alert" className="error banner">{error}</p>}{groups.length ? groups.map(g => <DayCard key={g} record={selectedRecord} group={g} day={selectedDay} loading={loading} />) : <section className="schedule-card empty"><h2>{loading ? 'Визначаємо чергу…' : error ? 'Дані недоступні' : 'Для адреси немає черги ГПВ'}</h2><p>Перевірте точне написання будинку в налаштуваннях.</p></section>}
