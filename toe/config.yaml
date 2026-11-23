@@ -1,0 +1,16 @@
+name: Світло вдома — ТОЕ
+version: "1.0.0"
+slug: toe
+description: Графік відключень Тернопільобленерго для вашої адреси
+arch:
+  - amd64
+  - aarch64
+startup: application
+boot: auto
+init: false
+ingress: true
+ingress_port: 4173
+panel_icon: mdi:lightning-bolt
+panel_title: Світло вдома
+options: {}
+schema: {}

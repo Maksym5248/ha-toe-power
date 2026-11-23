@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.DS_Store
+# Supervisor builds from this self-contained add-on distribution.
+!toe/app/dist/
+!toe/app/dist/**

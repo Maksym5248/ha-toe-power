@@ -1,0 +1,10 @@
+import { cp, mkdir, rm } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+const root = fileURLToPath(new URL('../', import.meta.url));
+const target = path.join(root, 'toe/app');
+await rm(target, { recursive: true, force: true });
+await mkdir(path.join(target, 'dist'), { recursive: true });
+await cp(path.join(root, 'dist/client'), path.join(target, 'dist/client'), { recursive: true });
+await cp(path.join(root, 'server.mjs'), path.join(target, 'server.mjs'));
+console.log('Prepared toe/app. Commit this generated directory with toe/config.yaml for installation by Supervisor.');
